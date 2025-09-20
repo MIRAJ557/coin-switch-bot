@@ -11,7 +11,7 @@ const serviceAccount = JSON.parse(process.env.FIREBASE_KEY); // এটিও Ren
 // Firebase এবং Telegram Bot চালু করা হচ্ছে
 initializeApp({ credential: cert(serviceAccount) });
 const db = getFirestore();
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+const bot = new TelegramBot(BOT_TOKEN);
 
 // --- Render.com Health Check - START ---
 // এই অংশটি Render-কে জানানোর জন্য যে আমাদের বটটি ঠিকভাবে চলছে
