@@ -1,83 +1,93 @@
-// প্রয়োজনীয় লাইব্রেরিগুলো নিয়ে আসা হচ্ছে
+// --- ধাপ ১: প্রয়োজনীয় লাইব্রেরি এবং ভেরিয়েবল সেটআপ (আপনার মতোই) ---
 const TelegramBot = require('node-telegram-bot-api');
 const { initializeApp, cert } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 
-// --- এখানে আপনার নিজের তথ্য দিন ---
-const WEBAPP_URL = 'https://gleeful-salmiakki-c9bf45.netlify.app/'; // !! খুবই গুরুত্বপূর্ণ: এই URL পরিবর্তন করতে হবে !!
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN; // এটি আমরা Render-এ সেট করেছি
-const serviceAccount = JSON.parse(process.env.FIREBASE_KEY); // এটিও Render-এ সেট করা আছে
+// --- আপনার নিজের তথ্য দিন ---
+const WEBAPP_URL = 'https://gleeful-salmiakki-c9bf45.netlify.app/'; // !! এই URL পরিবর্তন করতে হতে পারে !!
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN; // এটি Render-এ সেট করা আছে, যা সঠিক
+const serviceAccount = JSON.parse(process.env.FIREBASE_KEY); // এটিও Render-এ সেট করা আছে, চমৎকার!
 
-// Firebase এবং Telegram Bot চালু করা হচ্ছে
-initializeApp({ credential: cert(serviceAccount) });
+// --- ধাপ ২: Firebase এবং Telegram Bot চালু করা ---
+initializeApp({
+    credential: cert(serviceAccount)
+});
+
 const db = getFirestore();
-const bot = new TelegramBot(BOT_TOKEN);
+// গুরুত্বপূর্ণ পরিবর্তন: polling: true যোগ করতে হবে যাতে বট সব সময় মেসেজ শোনে
+const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
-// --- Render.com Health Check - START ---
-// এই অংশটি Render-কে জানানোর জন্য যে আমাদের বটটি ঠিকভাবে চলছে
-const http = require('http');
-const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Bot is alive');
-});
-server.listen(10000, () => {
-    console.log('Health check server running on port 10000');
-});
-// --- Render.com Health Check - END ---
+console.log('Bot has been started...');
 
-console.log('Bot is starting up...');
+// --- ধাপ ৩: "/start" কমান্ডের জন্য লজিক লেখা (সবচেয়ে গুরুত্বপূর্ণ অংশ) ---
 
-// যখন কোনো ব্যবহারকারী /start কমান্ড দেয়
-bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
+// bot.onText() ফাংশনটি নির্দিষ্ট কমান্ড শোনার জন্য কাজ করে
+// /\/start(.*)/ মানে হলো, "/start" দিয়ে শুরু হওয়া যেকোনো মেসেজ সে ধরবে
+bot.onText(/\/start(.*)/, async (msg, match) => {
+
+    // msg.chat.id থেকে আমরা ব্যবহারকারীর ইউনিক টেলিগ্রাম আইডি পাই
     const chatId = msg.chat.id;
-    const newUserId = `tg_${chatId}`; // নতুন ব্যবহারকারীর আইডি
-    const referrerId = match[1]; // রেফারেল লিংক থেকে পাওয়া রেফারারের আইডি
+    const newUserId = `tg_${chatId}`;
+    
+    // match[1] এর মধ্যে রেফারেল কোডটি থাকবে (যদি থাকে)
+    // .trim() দিয়ে অতিরিক্ত স্পেস মুছে ফেলা হলো
+    const referrerId = match[1] ? match[1].trim() : null;
 
-    try {
-        const newUserRef = db.collection('users').doc(newUserId);
-        const newUserDoc = await newUserRef.get();
+    console.log(`User ${newUserId} started the bot.`);
+    if (referrerId) {
+        console.log(`Referrer ID found: ${referrerId}`);
+    }
 
-        // যদি ব্যবহারকারী নতুন হয়, তবেই রেফারেল কাউন্ট হবে
-        if (!newUserDoc.exists) {
-            console.log(`New user detected: ${newUserId}`);
-            
-            const defaultUserData = {
-                userId: newUserId,
-                csBalance: 0, usdBalance: 0,
-                hashPower: 10, dailyUsdReward: 0,
-                lastTapTime: 0, purchasedPackages: [],
-                referralCount: 0, referralEarnings: 0,
-                createdAt: FieldValue.serverTimestamp()
-            };
+    // নতুন ব্যবহারকারীকে ডাটাবেসে খোঁজা হচ্ছে
+    const newUserRef = db.collection('users').doc(newUserId);
+    const doc = await newUserRef.get();
 
-            if (referrerId && referrerId !== newUserId) {
-                console.log(`User ${newUserId} was referred by ${referrerId}.`);
-                defaultUserData.referredBy = referrerId;
+    // যদি ব্যবহারকারী ডাটাবেসে না থাকে, তবে সে নতুন ব্যবহারকারী
+    if (!doc.exists) {
+        console.log(`Creating new user profile for ${newUserId}`);
 
-                const referrerRef = db.collection('users').doc(referrerId);
+        // নতুন ব্যবহারকারীর জন্য ডিফল্ট ডেটা তৈরি করা
+        const userData = {
+            userId: newUserId,
+            csBalance: 0,
+            usdBalance: 0,
+            hashPower: 10,
+            dailyUsdReward: 0,
+            lastTapTime: 0,
+            purchasedPackages: [],
+            referralCount: 0,
+            referralEarnings: 0,
+            createdAt: FieldValue.serverTimestamp() // ব্যবহারকারী কখন যোগ দিয়েছে তা সেভ হবে
+        };
+
+        // যদি রেফারার থাকে এবং সে নিজে না হয়
+        if (referrerId && referrerId !== newUserId) {
+            userData.referredBy = referrerId;
+
+            // রেফারারের referralCount 1 বাড়ানো হবে
+            const referrerRef = db.collection('users').doc(referrerId);
+            const referrerDoc = await referrerRef.get();
+
+            if (referrerDoc.exists) {
+                console.log(`Updating referrer ${referrerId}'s referral count.`);
                 await referrerRef.update({
-                    referralCount: FieldValue.increment(1)
+                    referralCount: FieldValue.increment(1) // increment(1) সবচেয়ে নিরাপদ উপায়
                 });
-                console.log(`Referrer count for ${referrerId} updated.`);
             }
-            
-            await newUserRef.set(defaultUserData);
-            console.log(`New user data for ${newUserId} saved to Firebase.`);
         }
 
-        // ব্যবহারকারীকে মিনি অ্যাপ খোলার বাটন পাঠান
-        bot.sendMessage(chatId, "Welcome to Coin Switch! 🚀\n\nClick the 'Start Mining' button below to open the app and start earning!", {
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: '💎 Start Mining', web_app: { url: WEBAPP_URL } }]
-                ]
-            }
-        });
-
-    } catch (error) {
-        console.error('Error processing /start command:', error);
-        bot.sendMessage(chatId, "Sorry, something went wrong. Please try again later.");
+        // নতুন ব্যবহারকারীর তথ্য ডাটাবেসে সেভ করা
+        await newUserRef.set(userData);
+    } else {
+        console.log(`User ${newUserId} already exists.`);
     }
-});
 
-console.log('Bot is running and listening for commands...');
+    // সবশেষে, ব্যবহারকারীকে অ্যাপ খোলার বাটনসহ স্বাগত বার্তা পাঠানো
+    await bot.sendMessage(chatId, 'Welcome to Coin Switch! 🚀\n\nClick the button below to open the mining app and start earning!', {
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: '⚡ Open Mining App', web_app: { url: WEBAPP_URL } }]
+            ]
+        }
+    });
+});
